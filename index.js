@@ -15,11 +15,9 @@ const {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// Store selections & cooldowns
 const userSelections = new Map();
 const userCooldowns = new Map();
 
-// Prices
 const prices = {
   quality: { '360p': 0.12, '480p': 0.16, '720p': 0.21, '1080p': 0.28, '1440p': 0.39, '1660p': 0.52 },
   duration: { '4s': 0.06, '5s': 0.09, '6s': 0.13, '7s': 0.16, '8s': 0.19, '9s': 0.23, '10s': 0.30, '12s': 0.40, '14s': 0.52, '18s': 0.72 },
@@ -45,7 +43,6 @@ client.on(Events.InteractionCreate, async interaction => {
   const cooldown = 10 * 60 * 1000;
   const now = Date.now();
 
-  // Cooldown check
   if (userCooldowns.has(user)) {
     const lastUse = userCooldowns.get(user);
     if (now - lastUse < cooldown) {
@@ -58,7 +55,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
     await interaction.deferReply({ ephemeral: true });
 
-    // Menus
     const qualityMenu = new StringSelectMenuBuilder()
       .setCustomId('quality_select')
       .setPlaceholder('Select Quality')
@@ -79,30 +75,18 @@ client.on(Events.InteractionCreate, async interaction => {
       .setPlaceholder('Select Number of Clips')
       .addOptions([...Array(14).keys()].map(i => ({ label: `${i+1} clip(s)`, value: `${i+1}` })));
 
-    const aspectMenu = new StringSelectMenuBuilder()
-      .setCustomId('aspect_select')
-      .setPlaceholder('Select Aspect Ratio')
-      .addOptions([
-        { label: '16:9', value: '16:9' },
-        { label: '9:16', value: '9:16' },
-        { label: '3:2', value: '3:2' },
-        { label: '1:1', value: '1:1' }
-      ]);
-
     const promptButton = new ButtonBuilder()
       .setCustomId('prompt')
       .setLabel('Enter Prompt')
       .setStyle(ButtonStyle.Secondary);
 
-    const confirmButton = new ButtonBuilder()
+    const submitButton = new ButtonBuilder()
       .setCustomId('generate')
-      .setLabel('Confirm & Generate')
+      .setLabel('Submit & Generate')
       .setStyle(ButtonStyle.Primary);
 
-    // Initialize
-    userSelections.set(user, { quality: null, duration: null, steps: null, clips: '1', aspect: '16:9', prompt: '' });
+    userSelections.set(user, { quality: null, duration: null, steps: null, clips: '1', prompt: '' });
 
-    // Reply with max 5 rows
     await interaction.editReply({
       content: '🎬 Configure your video request:',
       components: [
@@ -110,9 +94,8 @@ client.on(Events.InteractionCreate, async interaction => {
         new ActionRowBuilder().addComponents(durationMenu),
         new ActionRowBuilder().addComponents(stepsMenu),
         new ActionRowBuilder().addComponents(clipsMenu),
-        new ActionRowBuilder().addComponents(aspectMenu),
-        new ActionRowBuilder().addComponents(promptButton, confirmButton)
-      ].slice(0,5)
+        new ActionRowBuilder().addComponents(promptButton, submitButton)
+      ]
     });
   }
 
@@ -124,12 +107,11 @@ client.on(Events.InteractionCreate, async interaction => {
       case 'duration_select': selection.duration = interaction.values[0]; break;
       case 'steps_select': selection.steps = interaction.values[0]; break;
       case 'clips_select': selection.clips = interaction.values[0]; break;
-      case 'aspect_select': selection.aspect = interaction.values[0]; break;
     }
     userSelections.set(user, selection);
 
     await interaction.update({
-      content: `🎬 Current selection:\n- Quality: **${selection.quality || 'Not set'}**\n- Duration: **${selection.duration || 'Not set'}**\n- Steps: **${selection.steps || 'Not set'}**\n- Clips: **${selection.clips}**\n- Aspect: **${selection.aspect}**\n- Prompt: **${selection.prompt || 'Not set'}**\n💰 Total Price: **$${calculatePrice(selection)}**`,
+      content: `🎬 Current selection:\n- Quality: **${selection.quality || 'Not set'}**\n- Duration: **${selection.duration || 'Not set'}**\n- Steps: **${selection.steps || 'Not set'}**\n- Clips: **${selection.clips}**\n- Prompt: **${selection.prompt || 'Not set'}**\n💰 Total Price: **$${calculatePrice(selection)}**`,
       components: interaction.message.components
     });
   }
@@ -138,7 +120,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isButton()) {
     const selection = userSelections.get(user);
 
-    // Prompt modal
     if (interaction.customId === 'prompt') {
       const modal = new ModalBuilder()
         .setCustomId('prompt_modal')
@@ -156,10 +137,9 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
-    // Generate / Confirm
     if (interaction.customId === 'generate') {
       if (!selection || !selection.quality || !selection.duration || !selection.steps || !selection.clips) {
-        return interaction.reply({ content: '⚠️ Please select all options before generating.', ephemeral: true });
+        return interaction.reply({ content: '⚠️ Please select all options before submitting.', ephemeral: true });
       }
 
       userCooldowns.set(user, now);
@@ -175,7 +155,6 @@ client.on(Events.InteractionCreate, async interaction => {
             { name: 'Duration', value: selection.duration },
             { name: 'Steps', value: selection.steps },
             { name: 'Clips', value: selection.clips },
-            { name: 'Aspect', value: selection.aspect },
             { name: 'Prompt', value: selection.prompt || 'Not set' },
             { name: 'Total Price', value: `$${totalPrice}` }
           )
@@ -184,7 +163,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       await interaction.reply({
-        content: '🚀 Your request has been generated! Click below to continue:',
+        content: '🚀 Your request has been submitted! Click below to continue:',
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
