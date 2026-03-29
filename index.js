@@ -15,7 +15,7 @@ const {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// Store selections & cooldowns
+// Store user selections and cooldowns
 const userSelections = new Map();
 const userCooldowns = new Map();
 
@@ -28,61 +28,51 @@ const prices = {
 };
 
 // Calculate total price
-function calculatePrice(sel) {
-  if (!sel) return 0;
-  const q = prices.quality[sel.quality] || 0;
-  const d = prices.duration[sel.duration] || 0;
-  const s = prices.steps[sel.steps] || 0;
-  const c = sel.clips || 1;
+function calculatePrice(selection) {
+  if (!selection) return 0;
+  const q = prices.quality[selection.quality] || 0;
+  const d = prices.duration[selection.duration] || 0;
+  const s = prices.steps[selection.steps] || 0;
+  const c = selection.clips || 1;
   return ((q + d + s) * c).toFixed(2);
 }
 
+// Ready
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  const userId = interaction.user.id;
-  const cooldown = 10 * 60 * 1000;
+  const user = interaction.user.id;
   const now = Date.now();
+  const cooldown = 10 * 60 * 1000; // 10 minutes
 
-  // Cooldown check
-  if (userCooldowns.has(userId)) {
-    const last = userCooldowns.get(userId);
-    if (now - last < cooldown) {
-      const remaining = Math.ceil((cooldown - (now - last)) / 60000);
-      return interaction.reply({ content: `⏱ Please wait ${remaining} minute(s) to use LoCord again!`, ephemeral: true });
-    }
+  if (userCooldowns.has(user) && now - userCooldowns.get(user) < cooldown) {
+    const remaining = Math.ceil((cooldown - (now - userCooldowns.get(user))) / 60000);
+    return interaction.reply({ content: `⏱ Please wait ${remaining} minute(s) to use LoCord again!`, ephemeral: true });
   }
 
-  // Handle /request
+  // Slash command /request
   if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
-    // Initialize user selection
-    userSelections.set(userId, { quality: null, duration: null, steps: null, clips: '1', prompt: '', aspect: '16:9' });
-
-    // Defer reply to prevent timeout
-    await interaction.deferReply({ ephemeral: true });
-
-    // Build menus
     const qualityMenu = new StringSelectMenuBuilder()
       .setCustomId('quality_select')
-      .setPlaceholder('Select Quality')
-      .addOptions(Object.entries(prices.quality).map(([k, v]) => ({ label: `${k} ($${v})`, value: k })));
+      .setPlaceholder('Select quality')
+      .addOptions(Object.keys(prices.quality).map(q => ({ label: q + ` ($${prices.quality[q]})`, value: q })));
 
     const durationMenu = new StringSelectMenuBuilder()
       .setCustomId('duration_select')
-      .setPlaceholder('Select Duration')
-      .addOptions(Object.entries(prices.duration).map(([k, v]) => ({ label: `${k} ($${v})`, value: k })));
+      .setPlaceholder('Select duration')
+      .addOptions(Object.keys(prices.duration).map(d => ({ label: d + ` ($${prices.duration[d]})`, value: d })));
 
     const stepsMenu = new StringSelectMenuBuilder()
       .setCustomId('steps_select')
-      .setPlaceholder('Select Detail')
-      .addOptions(Object.entries(prices.steps).map(([k, v]) => ({ label: `${k} ($${v})`, value: k })));
+      .setPlaceholder('Select steps/detail')
+      .addOptions(Object.keys(prices.steps).map(s => ({ label: s + ` ($${prices.steps[s]})`, value: s })));
 
     const clipsMenu = new StringSelectMenuBuilder()
       .setCustomId('clips_select')
-      .setPlaceholder('Select Clips')
-      .addOptions([...Array(14).keys()].map(i => ({ label: `${i + 1} clip(s)`, value: `${i + 1}` })));
+      .setPlaceholder('Select number of clips')
+      .addOptions([...Array(14).keys()].map(i => ({ label: `${i+1} clip(s)`, value: `${i+1}` })));
 
     const aspectMenu = new StringSelectMenuBuilder()
       .setCustomId('aspect_select')
@@ -94,11 +84,19 @@ client.on(Events.InteractionCreate, async interaction => {
         { label: '1:1', value: '1:1' }
       ]);
 
-    const promptButton = new ButtonBuilder().setCustomId('prompt').setLabel('Enter Prompt').setStyle(ButtonStyle.Secondary);
-    const generateButton = new ButtonBuilder().setCustomId('generate').setLabel('Generate Request').setStyle(ButtonStyle.Primary);
+    const promptButton = new ButtonBuilder()
+      .setCustomId('prompt')
+      .setLabel('Enter Prompt')
+      .setStyle(ButtonStyle.Secondary);
 
-    // Limit 5 action rows
-    await interaction.editReply({
+    const generateButton = new ButtonBuilder()
+      .setCustomId('generate')
+      .setLabel('Generate Request')
+      .setStyle(ButtonStyle.Primary);
+
+    userSelections.set(user, { quality: null, duration: null, steps: null, clips: '1', aspect: '16:9', prompt: '' });
+
+    await interaction.reply({
       content: '🎬 Configure your video request:',
       components: [
         new ActionRowBuilder().addComponents(qualityMenu),
@@ -106,46 +104,60 @@ client.on(Events.InteractionCreate, async interaction => {
         new ActionRowBuilder().addComponents(stepsMenu),
         new ActionRowBuilder().addComponents(clipsMenu),
         new ActionRowBuilder().addComponents(aspectMenu),
-        new ActionRowBuilder().addComponents(promptButton, generateButton)
-      ].slice(0, 5) // Discord max rows = 5
+        new ActionRowBuilder().addComponents(promptButton, generateButton) // Only 5 rows max
+      ].slice(0,5), // enforce max 5 rows
+      ephemeral: true
     });
   }
 
-  // Dropdowns
+  // Handle dropdown selections
   if (interaction.isStringSelectMenu()) {
-    const sel = userSelections.get(userId) || {};
-    switch (interaction.customId) {
+    const sel = userSelections.get(user) || {};
+    switch(interaction.customId){
       case 'quality_select': sel.quality = interaction.values[0]; break;
       case 'duration_select': sel.duration = interaction.values[0]; break;
       case 'steps_select': sel.steps = interaction.values[0]; break;
       case 'clips_select': sel.clips = interaction.values[0]; break;
       case 'aspect_select': sel.aspect = interaction.values[0]; break;
     }
-    userSelections.set(userId, sel);
-    await interaction.update({ content: `🎬 Selection updated:\n- Quality: ${sel.quality}\n- Duration: ${sel.duration}\n- Steps: ${sel.steps}\n- Clips: ${sel.clips}\n- Aspect: ${sel.aspect}\n- Prompt: ${sel.prompt || 'Not set'}\n💰 Total: $${calculatePrice(sel)}`, components: interaction.message.components });
+    userSelections.set(user, sel);
+    await interaction.update({
+      content: `🎬 Current selection:\n- Quality: **${sel.quality || 'N/A'}**\n- Duration: **${sel.duration || 'N/A'}**\n- Steps: **${sel.steps || 'N/A'}**\n- Clips: **${sel.clips}**\n- Aspect: **${sel.aspect || 'N/A'}**\n- Prompt: **${sel.prompt || 'N/A'}**\n💰 Total Price: **$${calculatePrice(sel)}**`,
+      components: interaction.message.components,
+      ephemeral: true
+    });
   }
 
-  // Buttons
+  // Handle button clicks
   if (interaction.isButton()) {
-    const sel = userSelections.get(userId) || {};
+    const sel = userSelections.get(user);
     if (interaction.customId === 'prompt') {
       const modal = new ModalBuilder()
         .setCustomId('prompt_modal')
         .setTitle('Enter Prompt')
-        .addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder().setCustomId('prompt_input').setLabel('Prompt').setStyle(TextInputStyle.Paragraph).setPlaceholder('Describe your video...').setRequired(true)
-        ));
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('prompt_input')
+              .setLabel('Prompt')
+              .setStyle(TextInputStyle.Paragraph)
+              .setPlaceholder('Describe your video...')
+              .setRequired(true)
+          )
+        );
       return interaction.showModal(modal);
     }
 
     if (interaction.customId === 'generate') {
-      if (!sel.quality || !sel.duration || !sel.steps || !sel.clips) return interaction.reply({ content: '⚠️ Select all options first.', ephemeral: true });
-      userCooldowns.set(userId, Date.now());
+      if (!sel || !sel.quality || !sel.duration || !sel.steps || !sel.clips) 
+        return interaction.reply({ content: '⚠️ Select all options first!', ephemeral: true });
 
-      const log = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
-      if (log) {
+      userCooldowns.set(user, now);
+
+      const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
+      if (logChannel) {
         const embed = new EmbedBuilder()
-          .setTitle('📩 New Request')
+          .setTitle('📩 New Video Request')
           .addFields(
             { name: 'User', value: interaction.user.tag },
             { name: 'Quality', value: sel.quality },
@@ -153,24 +165,28 @@ client.on(Events.InteractionCreate, async interaction => {
             { name: 'Steps', value: sel.steps },
             { name: 'Clips', value: sel.clips },
             { name: 'Aspect', value: sel.aspect },
-            { name: 'Prompt', value: sel.prompt || 'Not set' },
-            { name: 'Total', value: `$${calculatePrice(sel)}` }
-          )
-          .setColor(0x00FF00);
-        await log.send({ embeds: [embed] });
+            { name: 'Prompt', value: sel.prompt || 'N/A' },
+            { name: 'Total Price', value: `$${calculatePrice(sel)}` }
+          ).setColor(0x00FF00);
+        await logChannel.send({ embeds: [embed] });
       }
 
-      await interaction.reply({ content: '🚀 Your request is ready! Click below to continue:', components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Continue').setStyle(ButtonStyle.Link).setURL('https://your-redirect-link.com'))], ephemeral: true });
-      userSelections.delete(userId);
+      await interaction.reply({
+        content: '🚀 Request generated! Click below:',
+        components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Continue').setStyle(ButtonStyle.Link).setURL('https://your-redirect-link.com'))],
+        ephemeral: true
+      });
+
+      userSelections.delete(user);
     }
   }
 
   // Modal submit
   if (interaction.isModalSubmit() && interaction.customId === 'prompt_modal') {
-    const sel = userSelections.get(userId) || {};
+    const sel = userSelections.get(user) || {};
     sel.prompt = interaction.fields.getTextInputValue('prompt_input');
-    userSelections.set(userId, sel);
-    await interaction.reply({ content: `✅ Prompt saved: "${sel.prompt}"`, ephemeral: true });
+    userSelections.set(user, sel);
+    await interaction.reply({ content: `✅ Prompt saved:\n"${sel.prompt}"`, ephemeral: true });
   }
 });
 
