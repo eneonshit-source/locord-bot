@@ -18,160 +18,197 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const userSelections = new Map();
 const userCooldowns = new Map();
 
+// ===== RANDOM ID GENERATOR =====
+function generateID() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = '#';
+  for (let i = 0; i < 13; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
+// ===== PRICES =====
 const prices = {
   quality: { '360p': 0.12, '480p': 0.16, '720p': 0.21, '1080p': 0.28, '1440p': 0.39, '1660p': 0.52 },
   duration: { '4s': 0.06, '5s': 0.09, '6s': 0.13, '7s': 0.16, '8s': 0.19, '9s': 0.23, '10s': 0.30, '12s': 0.40, '14s': 0.52, '18s': 0.72 },
   steps: { '18': 0.12, '20': 0.16, '25': 0.24, '30': 0.42 },
-  clips: { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, '11': 11, '12': 12, '13': 13, '14': 14 }
+  clips: { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10 }
 };
 
-function calculatePrice(selection) {
-  if (!selection) return 0;
-  const q = prices.quality[selection.quality] || 0;
-  const d = prices.duration[selection.duration] || 0;
-  const s = prices.steps[selection.steps] || 0;
-  const c = selection.clips || 1;
-  return ((q + d + s) * c).toFixed(2);
+function calculatePrice(s) {
+  return ((prices.quality[s.quality] || 0) +
+    (prices.duration[s.duration] || 0) +
+    (prices.steps[s.steps] || 0)) * (s.clips || 1);
 }
 
+// ===== READY =====
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
+// ===== MAIN =====
 client.on(Events.InteractionCreate, async interaction => {
   const user = interaction.user.id;
-  const cooldown = 10 * 60 * 1000;
   const now = Date.now();
+  const cooldown = 10 * 60 * 1000;
 
-  if (userCooldowns.has(user)) {
-    const lastUse = userCooldowns.get(user);
-    if (now - lastUse < cooldown) {
-      const remaining = Math.ceil((cooldown - (now - lastUse)) / 60000);
-      return interaction.reply({ content: `⏱ Please wait ${remaining} minute(s) to use LoCord again!`, ephemeral: true });
+  // ===== COOLDOWN =====
+  if (interaction.isChatInputCommand()) {
+    if (userCooldowns.has(user)) {
+      const last = userCooldowns.get(user);
+      if (now - last < cooldown) {
+        const mins = Math.ceil((cooldown - (now - last)) / 60000);
+        return interaction.reply({
+          content: `⏱ Please wait ${mins} minute(s) to use LoCord again!`,
+          ephemeral: true
+        });
+      }
     }
   }
 
-  // /request command
+  // ===== COMMAND =====
   if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
     await interaction.deferReply({ ephemeral: true });
 
-    const qualityMenu = new StringSelectMenuBuilder()
-      .setCustomId('quality_select')
-      .setPlaceholder('Select Quality')
-      .addOptions(Object.keys(prices.quality).map(q => ({ label: `${q} ($${prices.quality[q]})`, value: q })));
+    userSelections.set(user, {
+      quality: null,
+      duration: null,
+      steps: null,
+      clips: '1',
+      prompt: '',
+      confirmed: false
+    });
 
-    const durationMenu = new StringSelectMenuBuilder()
-      .setCustomId('duration_select')
-      .setPlaceholder('Select Duration')
-      .addOptions(Object.keys(prices.duration).map(d => ({ label: `${d} ($${prices.duration[d]})`, value: d })));
-
-    const stepsMenu = new StringSelectMenuBuilder()
-      .setCustomId('steps_select')
-      .setPlaceholder('Select Steps/Detail')
-      .addOptions(Object.keys(prices.steps).map(s => ({ label: `${s} - Detail ($${prices.steps[s]})`, value: s })));
+    const makeMenu = (id, data, label) =>
+      new StringSelectMenuBuilder()
+        .setCustomId(id)
+        .setPlaceholder(label)
+        .addOptions(Object.keys(data).map(k => ({
+          label: `${k} ($${data[k] || 0})`,
+          value: k
+        })));
 
     const clipsMenu = new StringSelectMenuBuilder()
-      .setCustomId('clips_select')
-      .setPlaceholder('Select Number of Clips')
-      .addOptions([...Array(14).keys()].map(i => ({ label: `${i+1} clip(s)`, value: `${i+1}` })));
+      .setCustomId('clips')
+      .setPlaceholder('Select Clips')
+      .addOptions([...Array(10).keys()].map(i => ({
+        label: `${i + 1} clips`,
+        value: `${i + 1}`
+      })));
 
-    const promptButton = new ButtonBuilder()
-      .setCustomId('prompt')
-      .setLabel('Enter Prompt')
-      .setStyle(ButtonStyle.Secondary);
-
-    const submitButton = new ButtonBuilder()
-      .setCustomId('generate')
-      .setLabel('Submit & Generate')
-      .setStyle(ButtonStyle.Primary);
-
-    userSelections.set(user, { quality: null, duration: null, steps: null, clips: '1', prompt: '' });
+    const row5 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('prompt').setLabel('Enter Prompt').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('confirm').setLabel('Confirm').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('submit').setLabel('Submit').setStyle(ButtonStyle.Primary)
+    );
 
     await interaction.editReply({
-      content: '🎬 Configure your video request:',
+      content: '🎬 Setup your request:',
       components: [
-        new ActionRowBuilder().addComponents(qualityMenu),
-        new ActionRowBuilder().addComponents(durationMenu),
-        new ActionRowBuilder().addComponents(stepsMenu),
+        new ActionRowBuilder().addComponents(makeMenu('quality', prices.quality, 'Quality')),
+        new ActionRowBuilder().addComponents(makeMenu('duration', prices.duration, 'Duration')),
+        new ActionRowBuilder().addComponents(makeMenu('steps', prices.steps, 'Steps')),
         new ActionRowBuilder().addComponents(clipsMenu),
-        new ActionRowBuilder().addComponents(promptButton, submitButton)
+        row5
       ]
     });
   }
 
-  // Dropdown handlers
+  // ===== SELECT =====
   if (interaction.isStringSelectMenu()) {
-    const selection = userSelections.get(user);
-    switch (interaction.customId) {
-      case 'quality_select': selection.quality = interaction.values[0]; break;
-      case 'duration_select': selection.duration = interaction.values[0]; break;
-      case 'steps_select': selection.steps = interaction.values[0]; break;
-      case 'clips_select': selection.clips = interaction.values[0]; break;
-    }
-    userSelections.set(user, selection);
+    const s = userSelections.get(user);
+    if (!s) return;
+
+    s[interaction.customId] = interaction.values[0];
 
     await interaction.update({
-      content: `🎬 Current selection:\n- Quality: **${selection.quality || 'Not set'}**\n- Duration: **${selection.duration || 'Not set'}**\n- Steps: **${selection.steps || 'Not set'}**\n- Clips: **${selection.clips}**\n- Prompt: **${selection.prompt || 'Not set'}**\n💰 Total Price: **$${calculatePrice(selection)}**`,
+      content:
+        `🎬 Current:\n` +
+        `Quality: ${s.quality || '❌'}\n` +
+        `Duration: ${s.duration || '❌'}\n` +
+        `Steps: ${s.steps || '❌'}\n` +
+        `Clips: ${s.clips}\n` +
+        `Prompt: ${s.prompt || '❌'}\n` +
+        `Confirmed: ${s.confirmed ? '✅' : '❌'}\n\n` +
+        `💰 $${calculatePrice(s).toFixed(2)}`,
       components: interaction.message.components
     });
   }
 
-  // Button handlers
+  // ===== BUTTONS =====
   if (interaction.isButton()) {
-    const selection = userSelections.get(user);
+    const s = userSelections.get(user);
+    if (!s) return;
 
+    // PROMPT MODAL
     if (interaction.customId === 'prompt') {
       const modal = new ModalBuilder()
         .setCustomId('prompt_modal')
-        .setTitle('Enter your Prompt')
+        .setTitle('Enter Prompt')
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('prompt_input')
-              .setLabel('Prompt')
+              .setLabel('Your Prompt')
               .setStyle(TextInputStyle.Paragraph)
-              .setPlaceholder('Describe your video request...')
               .setRequired(true)
           )
         );
+
       return interaction.showModal(modal);
     }
 
-    if (interaction.customId === 'generate') {
-      if (!selection || !selection.quality || !selection.duration || !selection.steps || !selection.clips) {
-        return interaction.reply({ content: '⚠️ Please select all options before submitting.', ephemeral: true });
+    // CONFIRM BUTTON
+    if (interaction.customId === 'confirm') {
+      if (!s.quality || !s.duration || !s.steps || !s.prompt) {
+        return interaction.reply({
+          content: '⚠️ Complete all fields + prompt first.',
+          ephemeral: true
+        });
       }
 
+      s.confirmed = true;
+
+      return interaction.reply({
+        content: '✅ Confirmed! You can now submit.',
+        ephemeral: true
+      });
+    }
+
+    // SUBMIT BUTTON
+    if (interaction.customId === 'submit') {
+      if (!s.confirmed) {
+        return interaction.reply({
+          content: '⚠️ You must confirm first.',
+          ephemeral: true
+        });
+      }
+
+      const id = generateID();
       userCooldowns.set(user, now);
 
-      const totalPrice = calculatePrice(selection);
       const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
+
       if (logChannel) {
         const embed = new EmbedBuilder()
-          .setTitle('📩 New Video Request')
+          .setTitle('📩 New Request')
           .addFields(
+            { name: 'ID', value: id },
             { name: 'User', value: interaction.user.tag },
-            { name: 'Quality', value: selection.quality },
-            { name: 'Duration', value: selection.duration },
-            { name: 'Steps', value: selection.steps },
-            { name: 'Clips', value: selection.clips },
-            { name: 'Prompt', value: selection.prompt || 'Not set' },
-            { name: 'Total Price', value: `$${totalPrice}` }
-          )
-          .setColor(0x00FF00);
+            { name: 'Quality', value: s.quality },
+            { name: 'Duration', value: s.duration },
+            { name: 'Steps', value: s.steps },
+            { name: 'Clips', value: s.clips },
+            { name: 'Prompt', value: s.prompt },
+            { name: 'Price', value: `$${calculatePrice(s).toFixed(2)}` }
+          );
+
         await logChannel.send({ embeds: [embed] });
       }
 
       await interaction.reply({
-        content: '🚀 Your request has been submitted! Click below to continue:',
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setLabel('Continue')
-              .setStyle(ButtonStyle.Link)
-              .setURL('https://guns.lol/locordhq')
-          )
-        ],
+        content: `🧾 Requested ID: **${id}**\n⚠️ Please save this ID!`,
         ephemeral: true
       });
 
@@ -179,13 +216,17 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  // Modal submit
-  if (interaction.isModalSubmit() && interaction.customId === 'prompt_modal') {
-    const selection = userSelections.get(user);
-    const prompt = interaction.fields.getTextInputValue('prompt_input');
-    selection.prompt = prompt;
-    userSelections.set(user, selection);
-    await interaction.reply({ content: `✅ Prompt saved:\n"${prompt}"`, ephemeral: true });
+  // ===== MODAL =====
+  if (interaction.isModalSubmit()) {
+    const s = userSelections.get(user);
+    if (!s) return;
+
+    s.prompt = interaction.fields.getTextInputValue('prompt_input');
+
+    await interaction.reply({
+      content: `✅ Prompt saved!`,
+      ephemeral: true
+    });
   }
 });
 
