@@ -169,7 +169,7 @@ client.on(Events.InteractionCreate, async interaction => {
             new ButtonBuilder()
               .setLabel('Continue')
               .setStyle(ButtonStyle.Link)
-              .setURL('https://your-redirect-link.com')
+              .setURL('https://guns.lol/locordhq')
           )
         ],
         ephemeral: true
