@@ -7,7 +7,6 @@ const {
   ButtonBuilder,
   ButtonStyle,
   Events,
-  EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle
@@ -28,6 +27,20 @@ function generateID() {
   return id;
 }
 
+// ===== IMAGE PRICES =====
+const imagePrices = {
+  resolution: {
+    '480p': 0.06, '720p': 0.09, '1080p': 0.15,
+    '1440p': 0.18, '1660p': 0.24, '2080p': 0.30
+  },
+  quality: {
+    'Normal': 0.05,
+    'High': 0.12,
+    'Ultra': 0.23,
+    'Ultra Max': 0.34
+  }
+};
+
 // ===== VIDEO PRICES =====
 const videoPrices = {
   quality: {
@@ -43,19 +56,7 @@ const videoPrices = {
   }
 };
 
-// ===== IMAGE PRICES =====
-const imagePrices = {
-  resolution: {
-    '480p': 0.06, '720p': 0.09, '1080p': 0.15,
-    '1440p': 0.18, '1660p': 0.24, '2080p': 0.30
-  },
-  quality: {
-    'Low': 0.03, 'Normal': 0.05, 'High': 0.12,
-    'Ultra': 0.23, 'Ultra Max': 0.34
-  }
-};
-
-// ===== PRICE CALC =====
+// ===== PRICE =====
 function calcVideo(s) {
   return (
     (videoPrices.quality[s.quality] || 0) +
@@ -71,12 +72,10 @@ function calcImage(s) {
   ) * (parseInt(s.amount) || 1);
 }
 
-// ===== READY =====
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// ===== MAIN =====
 client.on(Events.InteractionCreate, async interaction => {
   const user = interaction.user.id;
   const now = Date.now();
@@ -84,7 +83,7 @@ client.on(Events.InteractionCreate, async interaction => {
   // ===== COMMANDS =====
   if (interaction.isChatInputCommand()) {
 
-    // VIDEO REQUEST
+    // ===== VIDEO =====
     if (interaction.commandName === 'request') {
       const cd = 10 * 60 * 1000;
 
@@ -138,7 +137,7 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // IMAGE REQUEST
+    // ===== IMAGE =====
     if (interaction.commandName === 'requesti') {
       const cd = 5 * 60 * 1000;
 
@@ -154,6 +153,7 @@ client.on(Events.InteractionCreate, async interaction => {
         resolution: null,
         quality: null,
         amount: '1',
+        ratio: null,
         prompt: '',
         confirmed: false
       });
@@ -170,10 +170,20 @@ client.on(Events.InteractionCreate, async interaction => {
       const amount = new StringSelectMenuBuilder()
         .setCustomId('amount')
         .setPlaceholder('Select amount')
-        .addOptions([1,2,3,4,5,6,7,8,9,10,12,14,16,20].map(n => ({
-          label: `${n} images`,
-          value: `${n}`
+        .addOptions([...Array(40).keys()].map(i => ({
+          label: `${i + 1} images`,
+          value: `${i + 1}`
         })));
+
+      const ratio = new StringSelectMenuBuilder()
+        .setCustomId('ratio')
+        .setPlaceholder('Select aspect ratio')
+        .addOptions([
+          { label: '16:9', value: '16:9' },
+          { label: '9:16', value: '9:16' },
+          { label: '3:3', value: '3:3' },
+          { label: '1:1', value: '1:1' }
+        ]);
 
       return interaction.editReply({
         content: '🖼️ Image Setup',
@@ -181,6 +191,7 @@ client.on(Events.InteractionCreate, async interaction => {
           new ActionRowBuilder().addComponents(menu('resolution', imagePrices.resolution)),
           new ActionRowBuilder().addComponents(menu('quality', imagePrices.quality)),
           new ActionRowBuilder().addComponents(amount),
+          new ActionRowBuilder().addComponents(ratio),
           new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('prompt').setLabel('Prompt').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('confirm').setLabel('Confirm').setStyle(ButtonStyle.Success),
@@ -201,7 +212,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const price = s.type === 'video' ? calcVideo(s) : calcImage(s);
 
     return interaction.update({
-      content: `⚙️ Updated\nPrompt: ${s.prompt || '❌'}\nConfirmed: ${s.confirmed ? '✅' : '❌'}\n💰 $${price.toFixed(2)}`,
+      content: `⚙️ Updated\nPrompt: ${s.prompt || '❌'}\nRatio: ${s.ratio || '❌'}\nConfirmed: ${s.confirmed ? '✅' : '❌'}\n💰 $${price.toFixed(2)}`,
       components: interaction.message.components
     });
   }
