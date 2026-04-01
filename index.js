@@ -7,6 +7,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   Events,
+  EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle
@@ -17,7 +18,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const userSelections = new Map();
 const userCooldowns = new Map();
 
-// ===== ID =====
+// ===== ID GENERATOR =====
 function generateID() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let id = '#';
@@ -27,287 +28,249 @@ function generateID() {
   return id;
 }
 
-// ===== VIDEO =====
+// ===== PRICES =====
 const videoPrices = {
   quality: { '360p': 0.12, '480p': 0.16, '720p': 0.21, '1080p': 0.28, '1440p': 0.39, '1660p': 0.52 },
-  duration: { '4s': 0.06, '6s': 0.13, '8s': 0.19, '10s': 0.30, '14s': 0.52, '18s': 0.72 },
-  steps: { '18': 0.12, '20': 0.16, '25': 0.24, '30': 0.42 }
+  duration: { '18s': 0.16 }, // fixed duration for video
+  clips: { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, '11': 11, '12': 12, '13': 13, '14': 14, '15': 15, '16': 16 }
 };
 
-// ===== IMAGE =====
 const imagePrices = {
-  resolution: {
-    '480p': 0.06, '720p': 0.09, '1080p': 0.15,
-    '1440p': 0.18, '1660p': 0.24, '2080p': 0.30
+  resolution: { '480p': 0.06, '720p': 0.09, '1080p': 0.15, '1440p': 0.18, '1660p': 0.24, '2080p': 0.30 },
+  quality: { 'Normal': 0.05, 'High': 0.12, 'Ultra': 0.23, 'Ultra Max': 0.34 }, // Low removed
+  amount: {
+    '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
+    '12': 12, '14': 14, '16': 16, '20': 20, '24': 24, '28': 28, '32': 32, '36': 36, '40': 40
   },
-  quality: {
-    'Normal': 0.05,
-    'High': 0.12,
-    'Ultra': 0.23,
-    'Ultra Max': 0.34
-  }
+  aspectRatio: { '16:9': 0, '9:16': 0, '1:1': 0, '3:3': 0 } // free
 };
 
-// ===== CALC =====
-const calcVideo = s =>
-  ((videoPrices.quality[s.quality] || 0) +
-   (videoPrices.duration[s.duration] || 0) +
-   (videoPrices.steps[s.steps] || 0)) * (s.clips || 1);
+function calculatePriceVideo(s) {
+  return ((videoPrices.quality[s.quality] || 0) +
+    (videoPrices.duration['18s'] || 0)) * (parseInt(s.clips) || 1);
+}
 
-const calcImage = s =>
-  ((imagePrices.resolution[s.resolution] || 0) +
-   (imagePrices.quality[s.quality] || 0)) * (s.amount || 1);
+function calculatePriceImage(s) {
+  return ((imagePrices.resolution[s.resolution] || 0) +
+    (imagePrices.quality[s.quality] || 0)) * (parseInt(s.amount) || 1);
+}
 
+// ===== CLIENT READY =====
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// ===== HANDLER =====
+// ===== INTERACTIONS =====
 client.on(Events.InteractionCreate, async interaction => {
   const user = interaction.user.id;
   const now = Date.now();
+  const cooldown = 5 * 60 * 1000; // 5 min cooldown
 
-  try {
+  // COOLDOWN
+  if (userCooldowns.has(user) && now - userCooldowns.get(user) < cooldown) {
+    const mins = Math.ceil((cooldown - (now - userCooldowns.get(user))) / 60000);
+    if (interaction.isChatInputCommand()) {
+      return interaction.reply({ content: `⏱ Wait ${mins} minute(s) before using again.`, ephemeral: true });
+    }
+  }
 
-    // ================= VIDEO =================
-    if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
+  // ===== PANEL COMMAND =====
+  if (interaction.isChatInputCommand() && interaction.commandName === 'panel') {
+    const videoBtn = new ButtonBuilder()
+      .setCustomId('video_request')
+      .setLabel('Request Video')
+      .setStyle(ButtonStyle.Primary);
 
-      if (userCooldowns.has(user)) {
-        const diff = now - userCooldowns.get(user);
-        if (diff < 600000) {
-          return interaction.reply({
-            content: `⏱ Wait ${Math.ceil((600000 - diff) / 60000)} min`,
-            ephemeral: true
-          });
-        }
-      }
+    const imageBtn = new ButtonBuilder()
+      .setCustomId('image_request')
+      .setLabel('Request Image')
+      .setStyle(ButtonStyle.Success);
 
-      await interaction.deferReply({ ephemeral: true });
+    return interaction.reply({
+      content: '🎬 Choose what you want to request:',
+      components: [new ActionRowBuilder().addComponents(videoBtn, imageBtn)],
+      ephemeral: true
+    });
+  }
 
-      userSelections.set(user, {
-        type: 'video',
-        quality: null,
-        duration: null,
-        steps: null,
-        clips: '1',
-        prompt: '',
-        confirmed: false
-      });
+  // ===== START VIDEO REQUEST =====
+  if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
+    startVideoMenu(interaction);
+  }
 
-      const menu = (id, data) =>
-        new StringSelectMenuBuilder()
-          .setCustomId(id)
-          .setPlaceholder(`Select ${id}`)
-          .addOptions(Object.keys(data).map(k => ({
-            label: `${k} ($${data[k]})`,
-            value: k
-          })));
+  // ===== START IMAGE REQUEST =====
+  if (interaction.isChatInputCommand() && interaction.commandName === 'requesti') {
+    startImageMenu(interaction);
+  }
 
-      const clips = new StringSelectMenuBuilder()
-        .setCustomId('clips')
-        .setPlaceholder('Select clips')
-        .addOptions([...Array(16).keys()].map(i => ({
-          label: `${i + 1} clips`,
-          value: `${i + 1}`
-        })));
+  // ===== BUTTONS FROM PANEL =====
+  if (interaction.isButton()) {
+    if (interaction.customId === 'video_request') return startVideoMenu(interaction);
+    if (interaction.customId === 'image_request') return startImageMenu(interaction);
+  }
 
-      await interaction.editReply({
-        content: '🎬 VIDEO SETUP\nMake your selections below:',
-        components: [
-          new ActionRowBuilder().addComponents(menu('quality', videoPrices.quality)),
-          new ActionRowBuilder().addComponents(menu('duration', videoPrices.duration)),
-          new ActionRowBuilder().addComponents(menu('steps', videoPrices.steps)),
-          new ActionRowBuilder().addComponents(clips),
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('prompt').setLabel('Prompt').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('confirm').setLabel('Confirm').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('submit').setLabel('Submit').setStyle(ButtonStyle.Primary)
-          )
-        ]
-      });
+  // ===== VIDEO MENU HANDLER =====
+  async function startVideoMenu(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+
+    userSelections.set(user, { quality: null, clips: '1', prompt: '', confirmed: false });
+
+    const qualityMenu = new StringSelectMenuBuilder()
+      .setCustomId('video_quality')
+      .setPlaceholder('Select Video Resolution')
+      .addOptions(Object.keys(videoPrices.quality).map(q => ({ label: `${q} ($${videoPrices.quality[q]})`, value: q })));
+
+    const clipsMenu = new StringSelectMenuBuilder()
+      .setCustomId('video_clips')
+      .setPlaceholder('Select Number of Clips')
+      .addOptions(Object.keys(videoPrices.clips).map(c => ({ label: `${c} clip(s)`, value: c })));
+
+    const promptBtn = new ButtonBuilder().setCustomId('video_prompt').setLabel('Enter Prompt').setStyle(ButtonStyle.Secondary);
+    const confirmBtn = new ButtonBuilder().setCustomId('video_confirm').setLabel('Confirm').setStyle(ButtonStyle.Success);
+    const submitBtn = new ButtonBuilder().setCustomId('video_submit').setLabel('Submit').setStyle(ButtonStyle.Primary);
+
+    await interaction.editReply({
+      content: '🎬 Configure your video request:',
+      components: [
+        new ActionRowBuilder().addComponents(qualityMenu),
+        new ActionRowBuilder().addComponents(clipsMenu),
+        new ActionRowBuilder().addComponents(promptBtn, confirmBtn, submitBtn)
+      ]
+    });
+  }
+
+  // ===== IMAGE MENU HANDLER =====
+  async function startImageMenu(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+
+    userSelections.set(user, { resolution: null, quality: null, amount: '1', aspectRatio: '16:9', prompt: '', confirmed: false });
+
+    const resMenu = new StringSelectMenuBuilder()
+      .setCustomId('image_resolution')
+      .setPlaceholder('Select Resolution')
+      .addOptions(Object.keys(imagePrices.resolution).map(r => ({ label: `${r} ($${imagePrices.resolution[r]})`, value: r })));
+
+    const qualityMenu = new StringSelectMenuBuilder()
+      .setCustomId('image_quality')
+      .setPlaceholder('Select Quality')
+      .addOptions(Object.keys(imagePrices.quality).map(q => ({ label: `${q} ($${imagePrices.quality[q]})`, value: q })));
+
+    const amountMenu = new StringSelectMenuBuilder()
+      .setCustomId('image_amount')
+      .setPlaceholder('Select Amount')
+      .addOptions(Object.keys(imagePrices.amount).map(a => ({ label: `${a} image(s)`, value: a })));
+
+    const ratioMenu = new StringSelectMenuBuilder()
+      .setCustomId('image_ratio')
+      .setPlaceholder('Select Aspect Ratio')
+      .addOptions(Object.keys(imagePrices.aspectRatio).map(r => ({ label: r, value: r })));
+
+    const promptBtn = new ButtonBuilder().setCustomId('image_prompt').setLabel('Enter Prompt').setStyle(ButtonStyle.Secondary);
+    const confirmBtn = new ButtonBuilder().setCustomId('image_confirm').setLabel('Confirm').setStyle(ButtonStyle.Success);
+    const submitBtn = new ButtonBuilder().setCustomId('image_submit').setLabel('Submit').setStyle(ButtonStyle.Primary);
+
+    await interaction.editReply({
+      content: '🖼 Configure your image request:',
+      components: [
+        new ActionRowBuilder().addComponents(resMenu),
+        new ActionRowBuilder().addComponents(qualityMenu),
+        new ActionRowBuilder().addComponents(amountMenu),
+        new ActionRowBuilder().addComponents(ratioMenu),
+        new ActionRowBuilder().addComponents(promptBtn, confirmBtn, submitBtn)
+      ]
+    });
+  }
+
+  // ===== MENU SELECTION HANDLER =====
+  if (interaction.isStringSelectMenu()) {
+    const s = userSelections.get(user);
+    if (!s) return;
+
+    switch (interaction.customId) {
+      case 'video_quality': s.quality = interaction.values[0]; break;
+      case 'video_clips': s.clips = interaction.values[0]; break;
+      case 'image_resolution': s.resolution = interaction.values[0]; break;
+      case 'image_quality': s.quality = interaction.values[0]; break;
+      case 'image_amount': s.amount = interaction.values[0]; break;
+      case 'image_ratio': s.aspectRatio = interaction.values[0]; break;
     }
 
-    // ================= IMAGE =================
-    if (interaction.isChatInputCommand() && interaction.commandName === 'requesti') {
-
-      if (userCooldowns.has(user)) {
-        const diff = now - userCooldowns.get(user);
-        if (diff < 300000) {
-          return interaction.reply({
-            content: `⏱ Wait ${Math.ceil((300000 - diff) / 60000)} min`,
-            ephemeral: true
-          });
-        }
-      }
-
-      await interaction.deferReply({ ephemeral: true });
-
-      userSelections.set(user, {
-        type: 'image',
-        resolution: null,
-        quality: null,
-        ratio: null,
-        amount: '1',
-        prompt: '',
-        confirmed: false
-      });
-
-      const menu = (id, data) =>
-        new StringSelectMenuBuilder()
-          .setCustomId(id)
-          .setPlaceholder(`Select ${id}`)
-          .addOptions(Object.keys(data).map(k => ({
-            label: `${k} ($${data[k]})`,
-            value: k
-          })));
-
-      const ratioMenu = new StringSelectMenuBuilder()
-        .setCustomId('ratio')
-        .setPlaceholder('Aspect Ratio')
-        .addOptions([
-          { label: '16:9', value: '16:9' },
-          { label: '9:16', value: '9:16' },
-          { label: '1:1', value: '1:1' },
-          { label: '3:3', value: '3:3' }
-        ]);
-
-      const amountMenu = new StringSelectMenuBuilder()
-        .setCustomId('amount')
-        .setPlaceholder('Amount')
-        .addOptions([1,2,3,4,5,6,7,8,9,10,12,14,16,20,24,28,32,36,40].map(v => ({
-          label: `${v} images`,
-          value: `${v}`
-        })));
-
-      await interaction.editReply({
-        content: '🖼 IMAGE SETUP\nMake your selections below:',
-        components: [
-          new ActionRowBuilder().addComponents(menu('resolution', imagePrices.resolution)),
-          new ActionRowBuilder().addComponents(menu('quality', imagePrices.quality)),
-          new ActionRowBuilder().addComponents(ratioMenu),
-          new ActionRowBuilder().addComponents(amountMenu),
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('prompt').setLabel('Prompt').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('confirm').setLabel('Confirm').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('submit').setLabel('Submit').setStyle(ButtonStyle.Primary)
-          )
-        ]
-      });
+    let content = '';
+    if (s.quality && s.clips) {
+      content = `🎬 Video Setup:\n- Quality: ${s.quality}\n- Clips: ${s.clips}\n- Prompt: ${s.prompt || '❌'}\n- Confirmed: ${s.confirmed ? '✅' : '❌'}\n💰 $${calculatePriceVideo(s).toFixed(2)}`;
+    }
+    if (s.resolution && s.quality && s.amount) {
+      content = `🖼 Image Setup:\n- Resolution: ${s.resolution}\n- Quality: ${s.quality}\n- Amount: ${s.amount}\n- Aspect Ratio: ${s.aspectRatio}\n- Prompt: ${s.prompt || '❌'}\n- Confirmed: ${s.confirmed ? '✅' : '❌'}\n💰 $${calculatePriceImage(s).toFixed(2)}`;
     }
 
-    // ================= SELECT =================
-    if (interaction.isStringSelectMenu()) {
-      const s = userSelections.get(user);
-      if (!s) return interaction.reply({ content: '❌ Session expired', ephemeral: true });
+    await interaction.update({ content, components: interaction.message.components });
+  }
 
-      s[interaction.customId] = interaction.values[0];
+  // ===== MODAL =====
+  if (interaction.isModalSubmit()) {
+    const s = userSelections.get(user);
+    if (!s) return;
 
-      let summary = '';
-      let total = 0;
-
-      if (s.type === 'video') {
-        total = calcVideo(s);
-        summary =
-          `🎬 VIDEO SETUP\n\n` +
-          `Quality: ${s.quality || '❌'}\n` +
-          `Duration: ${s.duration || '❌'}\n` +
-          `Steps: ${s.steps || '❌'}\n` +
-          `Clips: ${s.clips}\n` +
-          `Prompt: ${s.prompt || '❌'}\n` +
-          `Confirmed: ${s.confirmed ? '✅' : '❌'}\n\n` +
-          `💰 Total: $${total.toFixed(2)}`;
-      }
-
-      if (s.type === 'image') {
-        total = calcImage(s);
-        summary =
-          `🖼 IMAGE SETUP\n\n` +
-          `Resolution: ${s.resolution || '❌'}\n` +
-          `Quality: ${s.quality || '❌'}\n` +
-          `Ratio: ${s.ratio || '❌'}\n` +
-          `Amount: ${s.amount}\n` +
-          `Prompt: ${s.prompt || '❌'}\n` +
-          `Confirmed: ${s.confirmed ? '✅' : '❌'}\n\n` +
-          `💰 Total: $${total.toFixed(2)}`;
-      }
-
-      return interaction.update({
-        content: summary,
-        components: interaction.message.components
-      });
+    if (interaction.customId === 'video_prompt' || interaction.customId === 'image_prompt') {
+      s.prompt = interaction.fields.getTextInputValue('prompt_input');
+      return interaction.reply({ content: `✅ Prompt saved!`, ephemeral: true });
     }
+  }
 
-    // ================= BUTTONS =================
-    if (interaction.isButton()) {
-      const s = userSelections.get(user);
-      if (!s) return interaction.reply({ content: '❌ Session expired', ephemeral: true });
+  // ===== BUTTONS =====
+  if (interaction.isButton()) {
+    const s = userSelections.get(user);
+    if (!s) return;
 
-      if (interaction.customId === 'prompt') {
-        return interaction.showModal(
-          new ModalBuilder()
-            .setCustomId('prompt_modal')
-            .setTitle('Enter Prompt')
-            .addComponents(
-              new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                  .setCustomId('prompt_input')
-                  .setLabel('Prompt')
-                  .setStyle(TextInputStyle.Paragraph)
-                  .setRequired(true)
-              )
-            )
-        );
-      }
-
-      if (interaction.customId === 'confirm') {
+    // CONFIRM
+    if (interaction.customId === 'video_confirm' || interaction.customId === 'image_confirm') {
+      if ((s.quality && s.prompt) || (s.resolution && s.quality && s.amount && s.prompt)) {
         s.confirmed = true;
         return interaction.reply({ content: '✅ Confirmed!', ephemeral: true });
-      }
-
-      if (interaction.customId === 'submit') {
-        if (!s.confirmed) {
-          return interaction.reply({ content: '⚠️ Confirm first!', ephemeral: true });
-        }
-
-        const id = generateID();
-        userCooldowns.set(user, now);
-
-        return interaction.reply({
-          content: `🧾 ID: **${id}**\nSave it!`,
-          components: [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('proceed').setLabel('Proceed').setStyle(ButtonStyle.Success)
-            )
-          ],
-          ephemeral: true
-        });
-      }
-
-      if (interaction.customId === 'proceed') {
-        return interaction.reply({
-          content: `✅ Continue:\nhttps://guns.lol/locordhq`,
-          ephemeral: true
-        });
+      } else {
+        return interaction.reply({ content: '⚠️ Fill all options and prompt first.', ephemeral: true });
       }
     }
 
-    // ================= MODAL =================
-    if (interaction.isModalSubmit()) {
-      const s = userSelections.get(user);
-      if (!s) return;
+    // SUBMIT
+    if (interaction.customId === 'video_submit' || interaction.customId === 'image_submit') {
+      if (!s.confirmed) return interaction.reply({ content: '⚠️ Confirm first.', ephemeral: true });
 
-      s.prompt = interaction.fields.getTextInputValue('prompt_input');
+      const id = generateID();
+      userCooldowns.set(user, now);
+
+      const totalPrice = s.clips ? calculatePriceVideo(s).toFixed(2) : calculatePriceImage(s).toFixed(2);
+
+      const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
+      if (logChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle('📩 New Request')
+          .addFields(
+            { name: 'ID', value: id },
+            { name: 'User', value: interaction.user.tag },
+            { name: 'Prompt', value: s.prompt },
+            { name: 'Total Price', value: `$${totalPrice}` }
+          );
+        await logChannel.send({ embeds: [embed] });
+      }
 
       return interaction.reply({
-        content: `✅ Prompt saved!\n"${s.prompt}"`,
+        content: `🧾 Requested ID: **${id}**\n⚠️ Please save this ID!`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('proceed').setLabel('Proceed').setStyle(ButtonStyle.Success)
+          )
+        ],
         ephemeral: true
       });
     }
 
-  } catch (err) {
-    console.error(err);
-    if (!interaction.replied) {
-      interaction.reply({ content: '❌ Error occurred', ephemeral: true });
+    // PROCEED
+    if (interaction.customId === 'proceed') {
+      return interaction.reply({
+        content: `✅ Proceed with your request:\nhttps://guns.lol/locordhq`,
+        ephemeral: true
+      });
     }
   }
 });
