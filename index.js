@@ -7,7 +7,6 @@ const {
   ButtonBuilder,
   ButtonStyle,
   Events,
-  EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle
@@ -18,7 +17,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const userSelections = new Map();
 const userCooldowns = new Map();
 
-// ===== ID GENERATOR =====
+// ===== ID =====
 function generateID() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let id = '#';
@@ -28,58 +27,51 @@ function generateID() {
   return id;
 }
 
-// ===== VIDEO PRICES =====
+// ===== VIDEO =====
 const videoPrices = {
   quality: { '360p': 0.12, '480p': 0.16, '720p': 0.21, '1080p': 0.28, '1440p': 0.39, '1660p': 0.52 },
   duration: { '4s': 0.06, '6s': 0.13, '8s': 0.19, '10s': 0.30, '14s': 0.52, '18s': 0.72 },
   steps: { '18': 0.12, '20': 0.16, '25': 0.24, '30': 0.42 }
 };
 
-// ===== IMAGE PRICES =====
+// ===== IMAGE =====
 const imagePrices = {
   resolution: {
     '480p': 0.06, '720p': 0.09, '1080p': 0.15,
     '1440p': 0.18, '1660p': 0.24, '2080p': 0.30
   },
   quality: {
-    'Normal': 0.05, 'High': 0.12,
-    'Ultra': 0.23, 'Ultra Max': 0.34
+    'Normal': 0.05,
+    'High': 0.12,
+    'Ultra': 0.23,
+    'Ultra Max': 0.34
   }
 };
 
-// ===== PRICE CALC =====
-function calcVideo(s) {
-  return (
-    (videoPrices.quality[s.quality] || 0) +
-    (videoPrices.duration[s.duration] || 0) +
-    (videoPrices.steps[s.steps] || 0)
-  ) * (s.clips || 1);
-}
+// ===== CALC =====
+const calcVideo = s =>
+  ((videoPrices.quality[s.quality] || 0) +
+   (videoPrices.duration[s.duration] || 0) +
+   (videoPrices.steps[s.steps] || 0)) * (s.clips || 1);
 
-function calcImage(s) {
-  return (
-    (imagePrices.resolution[s.resolution] || 0) +
-    (imagePrices.quality[s.quality] || 0)
-  ) * (s.amount || 1);
-}
+const calcImage = s =>
+  ((imagePrices.resolution[s.resolution] || 0) +
+   (imagePrices.quality[s.quality] || 0)) * (s.amount || 1);
 
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// ===== MAIN HANDLER =====
+// ===== HANDLER =====
 client.on(Events.InteractionCreate, async interaction => {
   const user = interaction.user.id;
   const now = Date.now();
 
   try {
 
-    // =========================
-    // ===== VIDEO REQUEST =====
-    // =========================
+    // ================= VIDEO =================
     if (interaction.isChatInputCommand() && interaction.commandName === 'request') {
 
-      // cooldown
       if (userCooldowns.has(user)) {
         const diff = now - userCooldowns.get(user);
         if (diff < 600000) {
@@ -120,7 +112,7 @@ client.on(Events.InteractionCreate, async interaction => {
         })));
 
       await interaction.editReply({
-        content: '🎬 VIDEO SETUP',
+        content: '🎬 VIDEO SETUP\nMake your selections below:',
         components: [
           new ActionRowBuilder().addComponents(menu('quality', videoPrices.quality)),
           new ActionRowBuilder().addComponents(menu('duration', videoPrices.duration)),
@@ -135,9 +127,7 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // =========================
-    // ===== IMAGE REQUEST =====
-    // =========================
+    // ================= IMAGE =================
     if (interaction.isChatInputCommand() && interaction.commandName === 'requesti') {
 
       if (userCooldowns.has(user)) {
@@ -190,7 +180,7 @@ client.on(Events.InteractionCreate, async interaction => {
         })));
 
       await interaction.editReply({
-        content: '🖼 IMAGE SETUP',
+        content: '🖼 IMAGE SETUP\nMake your selections below:',
         components: [
           new ActionRowBuilder().addComponents(menu('resolution', imagePrices.resolution)),
           new ActionRowBuilder().addComponents(menu('quality', imagePrices.quality)),
@@ -205,24 +195,49 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // =========================
-    // ===== SELECT MENUS =====
-    // =========================
+    // ================= SELECT =================
     if (interaction.isStringSelectMenu()) {
       const s = userSelections.get(user);
       if (!s) return interaction.reply({ content: '❌ Session expired', ephemeral: true });
 
       s[interaction.customId] = interaction.values[0];
 
+      let summary = '';
+      let total = 0;
+
+      if (s.type === 'video') {
+        total = calcVideo(s);
+        summary =
+          `🎬 VIDEO SETUP\n\n` +
+          `Quality: ${s.quality || '❌'}\n` +
+          `Duration: ${s.duration || '❌'}\n` +
+          `Steps: ${s.steps || '❌'}\n` +
+          `Clips: ${s.clips}\n` +
+          `Prompt: ${s.prompt || '❌'}\n` +
+          `Confirmed: ${s.confirmed ? '✅' : '❌'}\n\n` +
+          `💰 Total: $${total.toFixed(2)}`;
+      }
+
+      if (s.type === 'image') {
+        total = calcImage(s);
+        summary =
+          `🖼 IMAGE SETUP\n\n` +
+          `Resolution: ${s.resolution || '❌'}\n` +
+          `Quality: ${s.quality || '❌'}\n` +
+          `Ratio: ${s.ratio || '❌'}\n` +
+          `Amount: ${s.amount}\n` +
+          `Prompt: ${s.prompt || '❌'}\n` +
+          `Confirmed: ${s.confirmed ? '✅' : '❌'}\n\n` +
+          `💰 Total: $${total.toFixed(2)}`;
+      }
+
       return interaction.update({
-        content: `✅ Updated selection`,
+        content: summary,
         components: interaction.message.components
       });
     }
 
-    // =========================
-    // ===== BUTTONS =====
-    // =========================
+    // ================= BUTTONS =================
     if (interaction.isButton()) {
       const s = userSelections.get(user);
       if (!s) return interaction.reply({ content: '❌ Session expired', ephemeral: true });
@@ -246,12 +261,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
       if (interaction.customId === 'confirm') {
         s.confirmed = true;
-        return interaction.reply({ content: '✅ Confirmed', ephemeral: true });
+        return interaction.reply({ content: '✅ Confirmed!', ephemeral: true });
       }
 
       if (interaction.customId === 'submit') {
         if (!s.confirmed) {
-          return interaction.reply({ content: '⚠️ Confirm first', ephemeral: true });
+          return interaction.reply({ content: '⚠️ Confirm first!', ephemeral: true });
         }
 
         const id = generateID();
@@ -276,9 +291,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    // =========================
-    // ===== MODAL =====
-    // =========================
+    // ================= MODAL =================
     if (interaction.isModalSubmit()) {
       const s = userSelections.get(user);
       if (!s) return;
@@ -286,7 +299,7 @@ client.on(Events.InteractionCreate, async interaction => {
       s.prompt = interaction.fields.getTextInputValue('prompt_input');
 
       return interaction.reply({
-        content: '✅ Prompt saved',
+        content: `✅ Prompt saved!\n"${s.prompt}"`,
         ephemeral: true
       });
     }
