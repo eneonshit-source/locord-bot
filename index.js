@@ -27,7 +27,7 @@ function generateID() {
   return id;
 }
 
-// ===== IMAGE PRICES =====
+// ===== IMAGE =====
 const imagePrices = {
   resolution: {
     '480p': 0.06, '720p': 0.09, '1080p': 0.15,
@@ -41,7 +41,7 @@ const imagePrices = {
   }
 };
 
-// ===== VIDEO PRICES =====
+// ===== VIDEO =====
 const videoPrices = {
   quality: {
     '360p': 0.12, '480p': 0.16, '720p': 0.21,
@@ -56,7 +56,7 @@ const videoPrices = {
   }
 };
 
-// ===== PRICE =====
+// ===== CALC =====
 function calcVideo(s) {
   return (
     (videoPrices.quality[s.quality] || 0) +
@@ -80,7 +80,7 @@ client.on(Events.InteractionCreate, async interaction => {
   const user = interaction.user.id;
   const now = Date.now();
 
-  // ===== COMMANDS =====
+  // ================= COMMAND =================
   if (interaction.isChatInputCommand()) {
 
     // ===== VIDEO =====
@@ -177,7 +177,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const ratio = new StringSelectMenuBuilder()
         .setCustomId('ratio')
-        .setPlaceholder('Select aspect ratio')
+        .setPlaceholder('Aspect Ratio')
         .addOptions([
           { label: '16:9', value: '16:9' },
           { label: '9:16', value: '9:16' },
@@ -202,7 +202,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  // ===== SELECT =====
+  // ================= SELECT =================
   if (interaction.isStringSelectMenu()) {
     const s = userSelections.get(user);
     if (!s) return interaction.reply({ content: 'Session expired', ephemeral: true });
@@ -211,13 +211,20 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const price = s.type === 'video' ? calcVideo(s) : calcImage(s);
 
+    let text = `💰 $${price.toFixed(2)}\nPrompt: ${s.prompt || '❌'}\nConfirmed: ${s.confirmed ? '✅' : '❌'}`;
+
+    // ONLY show ratio for images
+    if (s.type === 'image') {
+      text += `\nRatio: ${s.ratio || '❌'}`;
+    }
+
     return interaction.update({
-      content: `⚙️ Updated\nPrompt: ${s.prompt || '❌'}\nRatio: ${s.ratio || '❌'}\nConfirmed: ${s.confirmed ? '✅' : '❌'}\n💰 $${price.toFixed(2)}`,
+      content: text,
       components: interaction.message.components
     });
   }
 
-  // ===== BUTTONS =====
+  // ================= BUTTONS =================
   if (interaction.isButton()) {
     const s = userSelections.get(user);
     if (!s) return;
@@ -277,7 +284,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  // ===== MODAL =====
+  // ================= MODAL =================
   if (interaction.isModalSubmit()) {
     const s = userSelections.get(user);
     if (!s) return;
