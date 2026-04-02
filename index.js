@@ -10,7 +10,10 @@ const {
   EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  REST,
+  Routes,
+  SlashCommandBuilder
 } = require('discord.js');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -18,6 +21,9 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // ===== STORAGE =====
 const userSelections = new Map();
 const userCooldowns = new Map();
+
+// ===== LOOP STORAGE =====
+const guildLoops = new Map();
 
 // ===== ID GENERATOR =====
 function generateID() {
@@ -93,9 +99,29 @@ function calculateImage(s) {
   return (r + q) * a;
 }
 
+// ===== SLASH COMMAND REGISTRATION =====
+const commands = [
+  new SlashCommandBuilder().setName('panel').setDescription('Send the AI request panel'),
+  new SlashCommandBuilder().setName('request').setDescription('Start a video request'),
+  new SlashCommandBuilder().setName('requesti').setDescription('Start an image request'),
+  new SlashCommandBuilder().setName('loop_start').setDescription('Start the 2-hour DISBOARD bump reminder loop'),
+  new SlashCommandBuilder().setName('loop_test').setDescription('Test the bump reminder loop (fires every 10 seconds, auto-stops after 3 sends)'),
+].map(cmd => cmd.toJSON());
+
 // ===== READY =====
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+    console.log('✅ Slash commands registered globally.');
+  } catch (err) {
+    console.error('❌ Failed to register slash commands:', err);
+  }
 });
 
 // ===== MAIN HANDLER =====
@@ -365,6 +391,81 @@ client.on(Events.InteractionCreate, async interaction => {
       s.prompt = interaction.fields.getTextInputValue('prompt_input');
 
       return interaction.reply({ content: '✅ Prompt saved!', ephemeral: true });
+    }
+
+    // ===== LOOP START COMMAND =====
+    if (interaction.isChatInputCommand() && interaction.commandName === 'loop_start') {
+      const guildId = interaction.guild.id;
+
+      if (guildLoops.has(guildId)) {
+        return interaction.reply({ content: '⚠️ A bump loop is already running. Use `/loop_stop` first.', ephemeral: true });
+      }
+
+      const reminderChannel = interaction.guild.channels.cache.get(process.env.REMINDER_CHANNEL_ID);
+      if (!reminderChannel) {
+        return interaction.reply({ content: '❌ Reminder channel not found. Check your `REMINDER_CHANNEL_ID` in `.env`.', ephemeral: true });
+      }
+
+      // Send first reminder immediately
+      await reminderChannel.send('@here 🔔 Time to bump the server! Use `/disboard bump` to help us grow!');
+
+      // Then repeat every 2 hours (7200000ms)
+      const interval = setInterval(async () => {
+        try {
+          const ch = interaction.guild.channels.cache.get(process.env.REMINDER_CHANNEL_ID);
+          if (ch) await ch.send('@here 🔔 Time to bump the server! Use `/disboard bump` to help us grow!');
+        } catch (err) {
+          console.error('Loop error:', err);
+        }
+      }, 7200000);
+
+      guildLoops.set(guildId, interval);
+
+      return interaction.reply({ content: '✅ Bump loop started! `/disboard bump` will be sent every 2 hours.', ephemeral: true });
+    }
+
+    // ===== LOOP TEST COMMAND =====
+    if (interaction.isChatInputCommand() && interaction.commandName === 'loop_test') {
+      const reminderChannel = interaction.guild.channels.cache.get(process.env.REMINDER_CHANNEL_ID);
+      if (!reminderChannel) {
+        return interaction.reply({ content: '❌ Reminder channel not found. Check your `REMINDER_CHANNEL_ID` in `.env`.', ephemeral: true });
+      }
+
+      await interaction.reply({ content: '🧪 Test started! Sending 3 reminders, 10 seconds apart. Watch your reminder channel.', ephemeral: true });
+
+      let count = 0;
+      await reminderChannel.send(`🧪 **[TEST]** @here 🔔 Time to bump the server! Use \`/disboard bump\` to help us grow!`);
+      count++;
+
+      const testInterval = setInterval(async () => {
+        try {
+          const ch = interaction.guild.channels.cache.get(process.env.REMINDER_CHANNEL_ID);
+          if (ch) await ch.send(`🧪 **[TEST]** @here 🔔 Time to bump the server! Use \`/disboard bump\` to help us grow!`);
+          count++;
+          if (count >= 3) {
+            clearInterval(testInterval);
+          }
+        } catch (err) {
+          console.error('Test loop error:', err);
+          clearInterval(testInterval);
+        }
+      }, 10000);
+
+      return;
+    }
+
+    // ===== LOOP STOP COMMAND =====
+    if (interaction.isChatInputCommand() && interaction.commandName === 'loop_stop') {
+      const guildId = interaction.guild.id;
+
+      if (!guildLoops.has(guildId)) {
+        return interaction.reply({ content: '⚠️ No bump loop is currently running.', ephemeral: true });
+      }
+
+      clearInterval(guildLoops.get(guildId));
+      guildLoops.delete(guildId);
+
+      return interaction.reply({ content: '🛑 Bump loop stopped.', ephemeral: true });
     }
 
   } catch (err) {
