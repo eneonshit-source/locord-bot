@@ -115,10 +115,10 @@ client.once(Events.ClientReady, async () => {
   try {
     const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
     await rest.put(
-      Routes.applicationCommands(client.user.id),
+      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
       { body: commands }
     );
-    console.log('✅ Slash commands registered globally.');
+    console.log('✅ Slash commands registered instantly for guild.');
   } catch (err) {
     console.error('❌ Failed to register slash commands:', err);
   }
